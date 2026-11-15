@@ -13,6 +13,11 @@ import (
 	"strings"
 )
 
+const (
+	// SandboxEnvVar is the environment variable key for the sandbox mode.
+	SandboxEnvVar = "BH_SANDBOX_MODE"
+)
+
 // buildSystemPrompt composes the system prompt. It appends the harness's
 // reasoning instructions (teach the model to clarify instead of refuse) to the
 // model's own guardrail instructions, which live inside the model and are

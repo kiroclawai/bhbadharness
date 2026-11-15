@@ -5,6 +5,7 @@ package bh
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Provider is a model provider.
@@ -28,6 +29,36 @@ const (
 
 func (p Provider) String() string {
 	return string(p)
+}
+
+// NormalizeProvider normalizes a provider name to its canonical form.
+func NormalizeProvider(s string) string {
+	switch {
+	case strings.Contains(strings.ToLower(s), "claude"):
+		return "anthropic"
+	case strings.Contains(strings.ToLower(s), "grok") || strings.Contains(strings.ToLower(s), "x-ai"):
+		return "xai"
+	case strings.Contains(strings.ToLower(s), "gemini"):
+		return "gemini"
+	case strings.Contains(strings.ToLower(s), "chatgpt") || strings.Contains(strings.ToLower(s), "gpt"):
+		return "openai"
+	case strings.Contains(strings.ToLower(s), "llama"):
+		return "llama" // will be normalized by model selection
+	case strings.Contains(strings.ToLower(s), "kimi"):
+		return "kimi"
+	case strings.Contains(strings.ToLower(s), "glm"):
+		return "glm"
+	case strings.Contains(strings.ToLower(s), "qwen"):
+		return "qwen"
+	case strings.Contains(strings.ToLower(s), "minimax"):
+		return "minimax"
+	case strings.Contains(strings.ToLower(s), "deepseek"):
+		return "deepseek"
+	case strings.Contains(strings.ToLower(s), "codex"):
+		return "codex"
+	default:
+		return s
+	}
 }
 
 // IsOpenAIStarWay reports whether the provider is OpenAI-compatible (chat

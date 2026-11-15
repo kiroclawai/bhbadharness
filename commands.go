@@ -35,9 +35,11 @@ func runCommand(cfg *bh.HarnessConfig, args []string, ss *bh.SessionStore) error
 	case "resume":
 		return cmdResume(cfg, ss, args[1:])
 	case "model":
-		return cmdModel(cfg, args[1:])
+		return cmdModel(cfg, args[1:], nil)
 	case "config":
 		return cmdConfig(cfg)
+	case "auth":
+		return cmdAuth(cfg, args[1:])
 	case "help":
 		return showHelp()
 	default:
@@ -74,7 +76,7 @@ func interactiveMode(cfg *bh.HarnessConfig, ss *bh.SessionStore) error {
 			if len(parts) > 1 {
 				rest = parts[1]
 			}
-			if err := handleCommand(cfg, ss, cmd, rest); err != nil {
+			if err := handleCommand(cfg, ss, cmd, rest, reader); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			}
 			fmt.Println("Repl> ")
@@ -207,19 +209,57 @@ func cmdResume(cfg *bh.HarnessConfig, ss *bh.SessionStore, args []string) error 
 }
 
 // cmdModel switches model/provider.
-func cmdModel(cfg *bh.HarnessConfig, args []string) error {
+func cmdModel(cfg *bh.HarnessConfig, args []string, reader *bufio.Reader) error {
+	// Filter out empty strings
+	trimmed := []string{}
+	for _, a := range args {
+		if strings.TrimSpace(a) != "" {
+			trimmed = append(trimmed, a)
+		}
+	}
+	args = trimmed
+
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bh badharness model <provider/model>")
+		// No args: show provider selection menu
+		fmt.Println("🔍 Model/Provider Selector")
+		fmt.Println("====================")
+		prov, err := bh.SelectProvider(reader)
+		if err != nil {
+			return err
+		}
+		// Show models for the selected provider
+		model, err := bh.SelectModel(prov, reader)
+		if err != nil {
+			return err
+		}
+		cfg.Provider = prov
+		cfg.Model = model.ID
+		fmt.Printf("🔄 Switched to %s / %s\n", prov, model.ID)
+		return nil
 	}
+
 	parts := strings.SplitN(args[0], "/", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("expected provider/model format: e.g. openai/gpt-4o")
+	if len(parts) == 2 {
+		// provider/model format: use directly
+		provider := bh.Provider(parts[0])
+		model := parts[1]
+		cfg.Provider = provider
+		cfg.Model = model
+		fmt.Printf("🔄 Switched to %s / %s\n", provider, model)
+		return nil
 	}
-	provider := bh.Provider(parts[0])
-	model := parts[1]
+
+	// Single provider: show model selection menu
+	provider := bh.Provider(args[0])
+	fmt.Printf("🔍 Select model for %s\n", provider)
+	fmt.Println("============================")
+	model, err := bh.SelectModel(provider, reader)
+	if err != nil {
+		return err
+	}
 	cfg.Provider = provider
-	cfg.Model = model
-	fmt.Printf("🔄 Switched to %s / %s\n", provider, model)
+	cfg.Model = model.ID
+	fmt.Printf("🔄 Switched to %s / %s\n", provider, model.ID)
 	return nil
 }
 
@@ -238,7 +278,7 @@ func cmdConfig(cfg *bh.HarnessConfig) error {
 }
 
 // handleCommand dispatches interactive commands.
-func handleCommand(cfg *bh.HarnessConfig, ss *bh.SessionStore, cmd, rest string) error {
+func handleCommand(cfg *bh.HarnessConfig, ss *bh.SessionStore, cmd, rest string, reader *bufio.Reader) error {
 	switch cmd {
 	case "/help", "/?":
 		return showHelp()
@@ -252,7 +292,7 @@ func handleCommand(cfg *bh.HarnessConfig, ss *bh.SessionStore, cmd, rest string)
 		return cmdResume(cfg, ss, args)
 	case "/model":
 		args := strings.Split(rest, " ")
-		return cmdModel(cfg, args)
+		return cmdModel(cfg, args, reader)
 	case "/config":
 		return cmdConfig(cfg)
 	case "/exit", "/quit":
@@ -269,17 +309,32 @@ func runRequest(cfg *bh.HarnessConfig, args []string) error {
 	ctx := context.Background()
 
 	// Build an LLM adapter implementing bh.LLM.
+	// Seamless auth: use stored provider credentials if available.
 	var adapter bh.LLM
-	if token := os.Getenv("BH_API_KEY"); token != "" && token != "sk-noop" {
+
+	// Check for stored credentials via auth store
+	var apiKey string
+	if authStore, err := bh.NewAuthStore(); err == nil {
+		if creds, ok := authStore.Get(string(cfg.Provider)); ok {
+			apiKey = creds.APIKey
+		}
+	}
+
+	// If no stored credentials, check BH_API_KEY env var
+	if apiKey == "" {
+		apiKey = os.Getenv("BH_API_KEY")
+	}
+
+	if apiKey != "" && apiKey != "sk-noop" {
 		// Private-gateway mode: use the explicit base URL.
 		baseURL := cfg.BaseURL
 		if baseURL == "" {
 			baseURL = os.Getenv("BH_BASE_URL")
 		}
 		if baseURL != "" {
-			adapter = llm.NewLLMWithBase(cfg.Provider, cfg.Model, token, baseURL)
+			adapter = llm.NewLLMWithBase(cfg.Provider, cfg.Model, apiKey, baseURL)
 		} else {
-			adapter = llm.NewLLM(cfg.Provider, cfg.Model, token)
+			adapter = llm.NewLLM(cfg.Provider, cfg.Model, apiKey)
 		}
 	} else {
 		adapter = llm.Default()
@@ -344,5 +399,151 @@ func runRequest(cfg *bh.HarnessConfig, args []string) error {
 	fmt.Printf("STATUS: %s\n", result.Decision)
 	fmt.Println("---")
 	fmt.Println(result.Content)
+	return nil
+}
+
+// cmdAuth handles auth commands (login, status, logout).
+func cmdAuth(cfg *bh.HarnessConfig, args []string) error {
+	if len(args) == 0 {
+		return showAuthHelp()
+	}
+	switch args[0] {
+	case "status":
+		return cmdAuthStatus(cfg)
+	case "login":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: bh auth login <provider>")
+		}
+		return cmdAuthLogin(cfg, args[1])
+	case "logout":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: bh auth logout <provider>")
+		}
+		return cmdAuthLogout(cfg, args[1])
+	default:
+		return fmt.Errorf("unknown auth command: %s (try: login <provider>, status, logout <provider>)", args[0])
+	}
+}
+
+// showAuthHelp displays auth-related help.
+func showAuthHelp() error {
+	fmt.Println("🔐 BH BadHarness — Auth Commands")
+	fmt.Println("====================")
+	fmt.Println("Usage: bh auth <command> [args]")
+	fmt.Println("Commands:")
+	fmt.Println("  login <provider>  Authenticate with a provider")
+	fmt.Println("  status            Show saved credentials")
+	fmt.Println("  logout <provider> Remove saved credentials")
+	fmt.Println()
+	fmt.Println("Providers: openai, anthropic, gemini, xai, openrouter, ollama, ollama-cloud, commandcode, kilocode, opencode-zen, opencode-go, commandcode-anthropic")
+	return nil
+}
+
+// cmdAuthStatus shows saved credentials.
+func cmdAuthStatus(cfg *bh.HarnessConfig) error {
+	authStore, err := bh.NewAuthStore()
+	if err != nil {
+		return err
+	}
+	providers := authStore.List()
+	if len(providers) == 0 {
+		fmt.Println("🔐 No saved credentials")
+		fmt.Println("\nRun `bh auth login <provider>` to authenticate with a provider.")
+		return nil
+	}
+	fmt.Println("🔐 Saved Credentials")
+	fmt.Println("====================")
+	for _, p := range providers {
+		creds, _ := authStore.Get(p)
+		fmt.Printf("  %s:\n", p)
+		if creds.Account != "" {
+			fmt.Printf("    Account: %s\n", creds.Account)
+		}
+		if creds.AccessToken != "" {
+			fmt.Printf("    Auth method: %s\n", creds.AuthMethod)
+			fmt.Printf("    Token: %s...\n", creds.AccessToken[:min(8, len(creds.AccessToken))])
+		}
+		if creds.APIKey != "" {
+			fmt.Printf("    Auth method: %s\n", creds.AuthMethod)
+			fmt.Printf("    API Key: %s...\n", creds.APIKey[:min(8, len(creds.APIKey))])
+		}
+	}
+	return nil
+}
+
+// cmdAuthLogin authenticates with a provider.
+func cmdAuthLogin(cfg *bh.HarnessConfig, provider string) error {
+	provider = bh.NormalizeProvider(provider)
+	if provider == "" {
+		return fmt.Errorf("unknown provider: %s", provider)
+	}
+
+	authStore, err := bh.NewAuthStore()
+	if err != nil {
+		return err
+	}
+
+	if creds, ok := authStore.Get(provider); ok {
+		fmt.Printf("🔐 Already authenticated with %s\n", provider)
+		if creds.Account != "" {
+			fmt.Printf("  Account: %s\n", creds.Account)
+		}
+		if creds.AccessToken != "" {
+			fmt.Printf("  Token: %s...\n", creds.AccessToken[:min(8, len(creds.AccessToken))])
+		}
+		return nil
+	}
+
+	fmt.Printf("🔐 Authenticating with %s...\n", provider)
+	fmt.Println("====================")
+	fmt.Println("No credentials found. Follow these steps:")
+
+	authMethod := bh.AuthMethodAPIKey
+	if provider == "openai" || provider == "anthropic" || provider == "openrouter" {
+		fmt.Println("  This provider supports OAuth login.")
+		fmt.Println("  Opening browser to login page...")
+	}
+
+	fmt.Println("\nEnter your", provider, "credentials:")
+	var input string
+	fmt.Scanln(&input)
+
+	creds := bh.ProviderCredentials{
+		APIKey:     input,
+		AuthMethod: authMethod,
+		TargetHost: "https://api.openai.com/v1",
+		Account:    provider,
+	}
+	if err := authStore.Save(provider, creds); err != nil {
+		return err
+	}
+
+	fmt.Printf("✅ Successfully authenticated with %s\n", provider)
+	fmt.Println("Your credentials are stored securely (0600 permissions).")
+	return nil
+}
+
+// cmdAuthLogout removes credentials for a provider.
+func cmdAuthLogout(cfg *bh.HarnessConfig, provider string) error {
+	provider = bh.NormalizeProvider(provider)
+	if provider == "" {
+		return fmt.Errorf("unknown provider: %s", provider)
+	}
+
+	authStore, err := bh.NewAuthStore()
+	if err != nil {
+		return err
+	}
+
+	_, exists := authStore.Get(provider)
+	if !exists {
+		fmt.Printf("🔐 No credentials found for %s\n", provider)
+		return nil
+	}
+
+	if err := authStore.Delete(provider); err != nil {
+		return err
+	}
+	fmt.Printf("✅ Removed credentials for %s\n", provider)
 	return nil
 }

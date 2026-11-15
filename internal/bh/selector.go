@@ -2,9 +2,11 @@
 package bh
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -596,4 +598,191 @@ func GetBaseURL(provider Provider, apiKeyEnvVar string) string {
 	}
 	// Fallback: OpenAI-compatible endpoint.
 	return "https://api.openai.com/v1"
+}
+
+// readLine reads a line from stdin using unbuffered reads.
+func readLine() (string, error) {
+	reader := bufio.NewReaderSize(os.Stdin, 1)
+	return reader.ReadString('\n')
+}
+
+// ---- Interactive selection menus (opencode/hermes-style pickers) ----------
+
+// SelectProvider shows a numbered provider picker and returns the selected provider.
+// Input can be a number (1-n) or a provider name; "q" quits to the parent menu.
+// reader provides the input stream shared with the REPL.
+func SelectProvider(reader *bufio.Reader) (Provider, error) {
+	pr := RegisterBuiltInProviders()
+	provs := pr.List()
+	if len(provs) == 0 {
+		return ProviderOpenAI, nil
+	}
+	fmt.Println("🔍 Select provider")
+	fmt.Println("=================")
+	for i, p := range provs {
+		fmt.Printf("  %d. %s\n", i+1, p.Name)
+	}
+	fmt.Println("q. Quit")
+	fmt.Print("Enter number (1-" + strconv.Itoa(len(provs)) + ") or name: ")
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return ProviderOpenAI, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "q" || line == "quit" {
+		return ProviderOpenAI, nil
+	}
+	if n, err := strconv.Atoi(line); err == nil && n >= 1 && n <= len(provs) {
+		return Provider(provs[n-1].ID), nil
+	}
+	return Provider(normalizeProvider(line)), nil
+}
+
+// SelectModel shows a numbered model picker for the given provider.
+// "q" or empty input goes back to the parent menu.
+// reader provides the input stream shared with the REPL.
+func SelectModel(provider Provider, reader *bufio.Reader) (ModelDef, error) {
+	pr := RegisterBuiltInProviders()
+	provs := pr.List()
+	var provDef ProviderDef
+	for _, p := range provs {
+		if p.ID == string(provider) {
+			provDef = p
+			break
+		}
+	}
+	if provDef.ID == "" {
+		return ModelDef{}, fmt.Errorf("provider not found: %s", provider)
+	}
+	models := DefaultModels()
+	var provModels []ModelDef
+	for _, md := range models.byProvider[provider] {
+		provModels = append(provModels, ModelDef{
+			ID:          md.ID,
+			Name:        md.Name,
+			Provider:    md.Provider,
+			ContextLen:  0,
+			IsLocal:     md.IsLocal,
+			Description: md.Name,
+		})
+	}
+	if len(provModels) == 0 {
+		return ModelDef{}, fmt.Errorf("no models for provider %s", provider)
+	}
+	fmt.Println("🔍 Select model")
+	fmt.Println("=============")
+	for i, m := range provModels {
+		fmt.Printf("  %d. %s\n", i+1, m.Name)
+	}
+	fmt.Println("q. Back")
+	fmt.Print("Enter number (1-" + strconv.Itoa(len(provModels)) + ") or leave empty: ")
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return ModelDef{}, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "q" || line == "" {
+		return ModelDef{}, nil
+	}
+	if n, err := strconv.Atoi(line); err == nil && n >= 1 && n <= len(provModels) {
+		return provModels[n-1], nil
+	}
+	for _, m := range provModels {
+		if m.Name == line || m.ID == line {
+			return m, nil
+		}
+	}
+	return ModelDef{}, fmt.Errorf("invalid model: %s", line)
+}
+
+// RegisterBuiltInProviders registers all built-in providers with a new
+// ProviderRegistry. This is called by New() in types.go.
+func RegisterBuiltInProviders() *ProviderRegistry {
+	pr := NewProviderRegistry()
+	pr.Register(ProviderDef{
+		ID:            "openai",
+		Name:          "OpenAI",
+		BaseURL:       "https://api.openai.com/v1",
+		BaseURLEnvVar: "OPENAI_BASE_URL",
+		APIKeyEnvVars: []string{"OPENAI_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "anthropic",
+		Name:          "Anthropic",
+		BaseURL:       "https://api.anthropic.com/v1/messages",
+		BaseURLEnvVar: "ANTHROPIC_BASE_URL",
+		APIKeyEnvVars: []string{"ANTHROPIC_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "gemini",
+		Name:          "Google Gemini",
+		BaseURL:       "https://generativelanguage.googleapis.com/v1beta/openai/",
+		BaseURLEnvVar: "GEMINI_BASE_URL",
+		APIKeyEnvVars: []string{"GEMINI_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "xai",
+		Name:          "xAI",
+		BaseURL:       "https://api.x.ai/v1",
+		BaseURLEnvVar: "XAI_BASE_URL",
+		APIKeyEnvVars: []string{"XAI_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "openrouter",
+		Name:          "OpenRouter",
+		BaseURL:       "https://openrouter.ai/api/v1",
+		BaseURLEnvVar: "OPENROUTER_BASE_URL",
+		APIKeyEnvVars: []string{"OPENROUTER_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "ollama",
+		Name:          "Ollama",
+		BaseURL:       "http://localhost:11434/api",
+		BaseURLEnvVar: "OLLAMA_BASE_URL",
+		APIKeyEnvVars: []string{"OLLAMA_BASE_URL"},
+	})
+	// Extended providers
+	pr.Register(ProviderDef{
+		ID:            "commandcode",
+		Name:          "CommandCode",
+		BaseURL:       "https://api.commandcode.ai/provider/v1",
+		BaseURLEnvVar: "COMMANDCODE_BASE_URL",
+		APIKeyEnvVars: []string{"COMMANDCODE_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "commandcode-anthropic",
+		Name:          "CommandCode (Anthropic)",
+		BaseURL:       "https://api.commandcode.ai/provider/v1",
+		BaseURLEnvVar: "COMMANDCODE_ANTHROPIC_BASE_URL",
+		APIKeyEnvVars: []string{"COMMANDCODE_ANTHROPIC_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "kilocode",
+		Name:          "KiloCode",
+		BaseURL:       "https://api.kilo.ai/api/gateway",
+		BaseURLEnvVar: "KILOCODE_BASE_URL",
+		APIKeyEnvVars: []string{"KILOCODE_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "opencode-zen",
+		Name:          "OpenCode Zen",
+		BaseURL:       "https://opencode.ai/zen/v1",
+		BaseURLEnvVar: "OPENCODE_ZEN_BASE_URL",
+		APIKeyEnvVars: []string{"OPENCODE_ZEN_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "opencode-go",
+		Name:          "OpenCode Go",
+		BaseURL:       "https://opencode.ai/zen/go/v1",
+		BaseURLEnvVar: "OPENCODE_GO_BASE_URL",
+		APIKeyEnvVars: []string{"OPENCODE_GO_BASE_URL"},
+	})
+	pr.Register(ProviderDef{
+		ID:            "ollama-cloud",
+		Name:          "Ollama Cloud",
+		BaseURL:       "https://ollama.com/v1",
+		BaseURLEnvVar: "OLLAMA_CLOUD_BASE_URL",
+		APIKeyEnvVars: []string{"OLLAMA_CLOUD_BASE_URL"},
+	})
+	return pr
 }
