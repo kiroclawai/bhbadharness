@@ -270,6 +270,7 @@ This file tracks everything remaining to reach market-leader parity.
 | Audit logging | MINIMAL | Design-level |
 | Security & sandboxing | DESIGN-LEVEL | Not implemented |
 | UI/UX | MINIMAL | Interactive REPL, basic commands (sessions, new, resume, model, config, request) |
+| Release | PUBLISHED | v2.0.0 at https://github.com/kiroclawai/bhbadharness/releases/tag/v2.0.0 |
 | Dependency cleanup | SKIPPED | Zero-dependency already |
 | O1/OpenClaw family | DESIGN-LEVEL | Not implemented |
 | Dependency cleanup | SKIPPED | Zero-dependency already |
