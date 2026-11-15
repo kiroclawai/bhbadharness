@@ -69,19 +69,67 @@
 - `Default()` returns deterministic in-memory mock
 - `Complete(ctx, req)` — answers safe questions, asks for scope on ambiguous requests
 
-## CLI Specification
+## CLI Specification (hermes/opencode/claude-code parity)
 
 ### Flags
-- `--model` / `BH_MODEL` — model id
-- `--posture` — `conservative`, `balanced`, `agile`
-- `--clarify-hint` — standing instruction appended to the prompt
-- `--log` / `BH_LOG` — audit log file path
 
-### Behavior
-- Falls back to in-memory mock when `BH_API_KEY` unset
-- Registers `read_file` and `web_search` tools by default
-- Only allow-listed tools may run (`registry.Allow()`)
-- Guardrail controller checks each tool call
+| Flag | Env Var | Type | Default | Description |
+|------|---------|------|---------|-------------|
+| `--model` / `BH_MODEL` | — | string | `gpt-4o` | Model id (format: `provider/model`) |
+| `--posture` | — | string | `balanced` | Harness guardrail posture: `conservative`, `balanced`, `agile` |
+| `--clarify-hint` | — | string | (built-in) | Standing instruction appended to the prompt |
+| `--log` / `BH_LOG` | — | string | (none) | Audit log file path |
+| `--provider` | — | string | — | Override provider for private gateway mode |
+| `--gateway` / `BH_BASE_URL` | — | string | — | Private gateway base URL override |
+
+### Per-Provider Env Vars
+
+| Provider | Env Var | Description |
+|----------|---------|-------------|
+| `openai` | `OPENAI_BASE_URL` | Custom base URL |
+| `anthropic` | `ANTHROPIC_BASE_URL` | Custom base URL |
+| `gemini` | `GEMINI_BASE_URL` | Custom base URL |
+| `xai` | `XAI_BASE_URL` | Custom base URL |
+| `openrouter` | `OPENROUTER_BASE_URL` | Custom base URL |
+| `ollama` | `OLLAMA_BASE_URL` | Custom base URL |
+| `commandcode` | `COMMANDCODE_BASE_URL` | Custom base URL |
+| `kilocode` | `KILOCODE_BASE_URL` | Custom base URL |
+| `opencode-zen` | `OPENCODE_ZEN_BASE_URL` | Custom base URL |
+| `opencode-go` | `OPENCODE_GO_BASE_URL` | Custom base URL |
+| `ollama-cloud` | `OLLAMA_CLOUD_BASE_URL` | Custom base URL |
+| `bh_provider_<name>` | `BH_PROVIDER_<NAME>_BASE_URL` | User-configured gateway override |
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `bh [request]` | Run a request (default); REPL when no args |
+| `bh help` | Show help / command palette |
+| `bh sessions` | List active sessions (pagination + search) |
+| `bh session <id|index>` | Show session detail with message history |
+| `bh new <title>` | Create a new session |
+| `bh resume <id|index>` | Resume a session |
+| `bh model <provider/model>` | Switch provider + model |
+| `bh config` | Show current configuration |
+
+### Interactive REPL
+
+When invoked with no arguments, `bh` enters an **interactive REPL** (mirrors hermes `session_history.py` + opencode TUI):
+
+```
+🔍 BH BadHarness v2 — interactive mode
+Type /help for commands, /exit to quit.
+Repl> 
+```
+
+REPL commands: `/help`, `/sessions`, `/new <title>`, `/resume <id|index>`, `/model`, `/config`, `/exit`
+REPL keybindings: `Ctrl+L` (redraw), `Ctrl+C` (interrupt), `Ctrl+D` (exit)
+
+### Rich Output
+
+- ANSI color verdicts: `allow` (green), `warn` (yellow), `block` (red), `halt` (magenta)
+- Session history pagination: long histories scroll with `-- More --`
+- Session detail view: conversation history with message roles and tool calls
 
 ## Configuration Specification
 

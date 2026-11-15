@@ -76,3 +76,19 @@ Memory entries are stored as JSON files:
 - `load()` — loads data from disk
 - Entries are keyed by string for fast lookup
 - Thread-safe with `sync.Mutex`
+
+## Session Persistence
+
+Sessions are persisted as JSON files in `DataDir`:
+
+- `Session` struct (ID, Title, CreatedAt, UpdatedAt, Messages)
+- `SessionStore` with `Create()`, `Get()`, `List()`, `Update()`, `Delete()`
+- One JSON file per session (e.g., `76640.json`)
+
+## CLI Memory Features
+
+- `/sessions` — lists active sessions with titles and timestamps
+- `/session <id>` — shows session detail with message history
+- `/new <title>` — creates a new session
+- `/resume <id|index>` — resumes a session from the REPL
+- Session persistence via `SessionStore` (JSON files in `DataDir`)

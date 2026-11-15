@@ -44,12 +44,8 @@
   - Ollama: `http://localhost:11434/api/chat`
   - OpenAI-compatible: `https://api.openai.com/v1`, `https://api.x.ai/v1`, `https://openrouter.ai/api/v1`
 - `NewLLMWithBase(provider, modelID, apiKey, baseURL)` — private gateway mode via custom endpoint
-- `GetBaseURL(provider, apiKeyEnvVar)` resolves effective base URL (env var override first, then hardcoded default)
-  - Anthropic: `https://api.anthropic.com/v1/messages`
-  - Gemini: `https://generativelanguage.googleapis.com/v1beta/models/{id}:generateContent`
-  - Ollama: `http://localhost:11434/api/chat`
-  - OpenAI-compatible: `https://api.openai.com/v1` (xAI: `https://api.x.ai/v1`, OpenRouter: `https://openrouter.ai/api/v1` via `NewClientWithBase`)
-- `Client` implements OpenAI-compatible `/chat/completions` with `Authorization: Bearer {token}`
+- `GetBaseURL(provider, apiKeyEnvVar)` — resolves effective base URL (env override first, then hardcoded default)
+- `Client` implements OpenAI-compatible `/chat/completions` with `Authorization: Bearer ***`
 
 ## Guardrail Controller
 
@@ -63,11 +59,91 @@
 - `applyStallDetectors()`: stall detection when repeated identical read-only tool call
 - Loop caps: web_search and subagent per-turn limits
 
+## CLI (hermes/opencode/claude-code parity)
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `bh [request]` | Run a request (default); REPL when no args |
+| `bh help` | Show help / command palette |
+| `bh sessions` | List active sessions (pagination + search) |
+| `bh session <id|index>` | Show session detail with message history |
+| `bh new <title>` | Create a new session |
+| `bh resume <id|index>` | Resume a session |
+| `bh model <provider/model>` | Switch provider + model |
+| `bh config` | Show current configuration |
+
+### Flag Reference
+
+| Flag | Env Var | Type | Default | Description |
+|------|---------|------|---------|-------------|
+| `--model` / `BH_MODEL` | — | string | `gpt-4o` | Model id (format: `provider/model`) |
+| `--posture` | — | string | `balanced` | Harness guardrail posture: `conservative`, `balanced`, `agile` |
+| `--clarify-hint` | — | string | (built-in) | Standing instruction appended to the prompt |
+| `--log` / `BH_LOG` | — | string | (none) | Audit log file path |
+| `--provider` | — | string | — | Override provider for private gateway mode |
+| `--gateway` / `BH_BASE_URL` | — | string | — | Private gateway base URL override |
+
+### Per-Provider Env Vars
+
+| Provider | Env Var | Description |
+|----------|---------|-------------|
+| `openai` | `OPENAI_BASE_URL` | Custom base URL |
+| `anthropic` | `ANTHROPIC_BASE_URL` | Custom base URL |
+| `gemini` | `GEMINI_BASE_URL` | Custom base URL |
+| `xai` | `XAI_BASE_URL` | Custom base URL |
+| `openrouter` | `OPENROUTER_BASE_URL` | Custom base URL |
+| `ollama` | `OLLAMA_BASE_URL` | Custom base URL |
+| `commandcode` | `COMMANDCODE_BASE_URL` | Custom base URL |
+| `kilocode` | `KILOCODE_BASE_URL` | Custom base URL |
+| `opencode-zen` | `OPENCODE_ZEN_BASE_URL` | Custom base URL |
+| `opencode-go` | `OPENCODE_GO_BASE_URL` | Custom base URL |
+| `ollama-cloud` | `OLLAMA_CLOUD_BASE_URL` | Custom base URL |
+| `bh_provider_<name>` | `BH_PROVIDER_<NAME>_BASE_URL` | User-configured gateway override |
+
+### Interactive REPL
+
+When invoked with no arguments, `bh` enters an **interactive REPL** (mirrors hermes `session_history.py` + opencode TUI):
+
+```
+🔍 BH BadHarness v2 — interactive mode
+Type /help for commands, /exit to quit.
+Repl> 
+```
+
+REPL commands:
+- `/help` — Show help
+- `/sessions` — List active sessions
+- `/new <title>` — Create a new session
+- `/resume <id|index>` — Resume a session
+- `/model <provider/model>` — Switch provider + model
+- `/config` — Show configuration
+- `/exit` — Exit REPL
+
+REPL keybindings:
+- `Ctrl+L` — Redraw prompt (clear terminal drift)
+- `Ctrl+C` — Interrupt current request
+- `Ctrl+D` — Exit REPL
+
+### Status Bar
+
+```
+[status] posture=balanced provider=openai model=gpt-4o | help | ctrl+c
+```
+
+### Rich Output
+
+- **ANSI color verdicts**: `allow` (green), `warn` (yellow), `block` (red), `halt` (magenta)
+- **Session history pagination**: long histories scroll with `-- More --`
+- **Session detail view**: conversation history with message roles and tool calls
+
 ## Memory
 
 - `MemoryStore` with `MemoryEntry` (Key, Label, Value, Source, Timestamp)
 - One JSON file per key in `DataDir`
 - `load()` and `persist()` for JSON persistence
+- Stores user preferences, known facts, prior context across turns
 
 ## Skills
 
@@ -80,12 +156,26 @@
 - `SubAgent` struct with `NewSubAgent(id, parent, task, allowedTools)`
 - `Run(ctx)` executes isolated agent loop with narrow tool allow-list and child harness
 - `buildChildHarness(parent, allowedTools)` creates isolated child harness
+- `MaxSubagents: 4` default cap
 
 ## Audit Logging
 
 - `AuditLogger` writes to log file (if `BH_LOG` set) and console
 - `Info()`, `Warn()` events with fields
 - `Close()` to flush and close file
+
+## Session Store (Persistence)
+
+- `SessionStore` with `Session` struct (ID, Title, CreatedAt, UpdatedAt, Messages)
+- One JSON file per session in `DataDir`
+- `Create()`, `Get()`, `List()`, `Update()`, `Delete()` for session lifecycle
+
+## Security & Sandboxing
+
+- Tool allow-list: only registered + allow-listed tools run
+- `read_file` and `web_search` registered by default
+- `GuardrailController` checks each tool call (allow/warn/block/halt)
+- All credentials redacted (API keys shown as `***` in logs)
 
 ## CLI
 
