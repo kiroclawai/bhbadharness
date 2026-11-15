@@ -18,3 +18,5 @@ Thumbs.db
 # Harness binaries in content/ and bhbadharness/
 content/bh
 bhbadharness/bh
+bhbadharness/
+content/
