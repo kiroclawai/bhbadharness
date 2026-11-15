@@ -1,0 +1,20 @@
+# Build artifacts
+/bh
+/bh.exe
+/bh.exe.manifest
+
+# IDE
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data
+*.log
+
+# Harness binaries in content/ and bhbadharness/
+content/bh
+bhbadharness/bh
