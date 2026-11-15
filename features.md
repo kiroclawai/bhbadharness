@@ -119,24 +119,63 @@ REPL commands:
 - `/resume <id|index>` — Resume a session
 - `/model <provider/model>` — Switch provider + model
 - `/config` — Show configuration
-- `/exit` — Exit REPL
+|| `/exit` | Exit REPL |
 
-REPL keybindings:
-- `Ctrl+L` — Redraw prompt (clear terminal drift)
-- `Ctrl+C` — Interrupt current request
-- `Ctrl+D` — Exit REPL
+### Seamless Login & Integration (New)
 
-### Status Bar
+When you run `bh` without credentials, you get interactive setup:
+
+| Command | Description |
+|---------|-------------|
+| `bh auth login <provider>` | Authenticate with a provider (OAuth or API key) |
+| `bh auth status` | Show saved credentials for all providers |
+| `bh auth logout <provider>` | Remove saved credentials |
+
+**How seamless auth works:**
+1. Select a provider + model in the REPL (`/model`)
+2. The harness checks `~/.bhbadharness/credentials.json` for stored credentials
+3. If found, the model is called with the stored key — no env var needed
+4. If not found, the harness prompts `bh auth login <provider>` to authenticate
+5. Credentials are stored with 0600 permissions (encrypted at rest)
+
+**Auth flow (`bh auth login <provider>`):**
+1. Opens provider's OAuth URL in browser
+2. User completes login
+3. OAuth code is exchanged for tokens
+4. Tokens are stored securely and reused on subsequent requests
+
+**Auth storage:** `~/.bhbadharness/credentials.json` (0600 permissions)
+
+**Auth storage:** `~/.bhbadharness/credentials.json` (0600 permissions)
+
+## Interactive REPL
+
+When `bh` starts with no arguments, it enters an interactive REPL. Key commands:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help |
+| `/sessions` | List active sessions |
+| `/new <title>` | Create a new session |
+| `/resume <id\|index>` | Resume a session |
+| `/model` | Select provider + model (interactive menu) |
+| `/config` | Show configuration |
+| `/exit` | Exit REPL |
+
+### Interactive Provider/Model Selection
+
+`/model` in the REPL shows a numbered provider picker:
 
 ```
-[status] posture=balanced provider=openai model=gpt-4o | help | ctrl+c
+🔍 Select provider
+=================
+ 1. Anthropic
+ 2. CommandCode
+ ...
+q. Quit
 ```
 
-### Rich Output
-
-- **ANSI color verdicts**: `allow` (green), `warn` (yellow), `block` (red), `halt` (magenta)
-- **Session history pagination**: long histories scroll with `-- More --`
-- **Session detail view**: conversation history with message roles and tool calls
+Then shows a numbered model picker for the selected provider.
 
 ## Memory
 
@@ -172,18 +211,33 @@ REPL keybindings:
 
 ## Security & Sandboxing
 
-- Tool allow-list: only registered + allow-listed tools run
-- `read_file` and `web_search` registered by default
-- `GuardrailController` checks each tool call (allow/warn/block/halt)
-- All credentials redacted (API keys shown as `***` in logs)
+|- Tool allow-list: only registered + allow-listed tools run
+|- `read_file` and `web_search` registered by default
+|- `GuardrailController` checks each tool call (allow/warn/block/halt)
+|- All credentials redacted (API keys shown as `***` in logs)
+|- `ToolSandbox` with `SandboxConfig`: timeout, memory, CPU limits
+|- `SafeArgs` validates arguments (no password/token/api_key keys)
+
+## Sandbox Features
+
+- `SandboxMode` (Off, Dir, User, Full): configurable sandboxing depth
+- `ToolLimits`: timeout (30s), max memory (256MB), max CPU (60s), CPU shares
+- `DefaultSandbox()`: conservative sandbox with allowed dirs/hosts
+- `SandboxFor(posture)`: posture-aware sandbox config
+  - `conservative`: full sandbox, restricted hosts, read-only system paths
+  - `balanced`: dir sandbox with common allowed hosts
+  - `agile`: permissive sandbox with more allowed hosts
+- `SafeArgs()` rejects forbidden keys (password, secret, token, key, credential, auth)
+- `SafeArgs()` also rejects credential patterns in values (sk-, ghp_, xoxb-, AIza)
 
 ## CLI
 
-- Flags: `--model`/`BH_MODEL`, `--posture` (conservative|balanced|agile), `--clarify-hint`, `--log`
-- Falls back to in-memory mock when `BH_API_KEY` unset (end-to-end runs work without network/credentials)
+|- Flags: `--model`/`BH_MODEL`, `--posture` (conservative|balanced|agile), `--clarify-hint`, `--log`
+|- Falls back to in-memory mock when `BH_API_KEY` unset (end-to-end runs work without network/credentials)
 
 ## Test Coverage
 
-- 6 tests passing:
-  - `internal/harness` suite (0.003s)
-  - `internal/llm` suite (mock, selector tests, TestNewLLM)
+|- 6 tests passing:
+|  - `internal/harness` suite (0.003s)
+|  - `internal/llm` suite (mock, selector tests, TestNewLLM)
+|- `TestSafeArgs` validates forbidden keys and credential patterns
